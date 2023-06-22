@@ -153,8 +153,8 @@ async function askForRepoUrl() {
       filter: function (val: string) {
         return val.toLowerCase() === "yes"
       },
-      when(answers: { onePdfPerFile: any }) {
-        return !answers.onePdfPerFile
+      when(answers: { onePdfPerFile: any, addPageNumbers: any }) {
+        return !answers.onePdfPerFile && answers.addPageNumbers
       },
     },
     {
