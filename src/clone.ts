@@ -9,7 +9,8 @@ import { default as hljs } from "highlight.js"
 import { isBinaryFileSync } from "isbinaryfile"
 import strip from "strip-comments"
 
-import { htmlToJson } from "./syntax"
+import htmlToJson from "./syntax"
+import addToC from "./addToC"
 import loadIgnoreConfig, { IgnoreConfig } from "./loadIgnoreConfig"
 import {
   universalExcludedExtensions,
@@ -154,7 +155,7 @@ async function askForRepoUrl() {
       },
       when(answers: { onePdfPerFile: any }) {
         return !answers.onePdfPerFile
-      }
+      },
     },
     {
       name: "outputFileName",
@@ -244,6 +245,12 @@ async function main(
 
   let ignoreConfig: IgnoreConfig | null = null
 
+  let filePaths = new Map()
+  let currentPage = 1
+
+  const linesPerPage = 60 // adjust as per your estimate
+  const bytesPerPage = 5000 // adjust as per your estimate
+
   gitP
     .clone(repoUrl, tempDir)
     .then(async () => {
@@ -255,16 +262,24 @@ async function main(
       appendFilesToPdf(tempDir, removeComments).then(() => {
         if (!onePdfPerFile) {
           if (doc) {
+            // Add ToC
+            if (addTableOfContents) {
+              doc.switchToPage(0) // switch to the first page
+              addToC(doc, filePaths)
+            }
+
             //Global Edits to All Pages (Header/Footer, etc)
-            let pages = doc.bufferedPageRange()
+            let pages = doc.bufferedPageRange() // we get the page range again after adding ToC
             for (let i = 0; i < pages.count; i++) {
+              // start loop from 1, as we've already added ToC to the first page
               doc.switchToPage(i)
 
+              // Add page numbers
               if (addPageNumbers) {
                 let oldBottomMargin = doc.page.margins.bottom
                 doc.page.margins.bottom = 0
                 doc.text(
-                  `Page: ${i + 1} of ${pages.count}`,
+                  `Page: ${i + 1} of ${pages.count - 1}`, // Adjusted page numbering
                   0,
                   doc.page.height - oldBottomMargin / 2,
                   { align: "center" }
@@ -320,6 +335,7 @@ async function main(
         spinner.text = chalk.blueBright(
           `Processing files... (${fileCount} processed)`
         )
+
         let fileName = path.relative(tempDir, filePath)
 
         if (onePdfPerFile) {
@@ -344,14 +360,18 @@ async function main(
               .font("Courier")
               .fontSize(10)
               .text(`${fileName}\n\nBASE64:\n\n${data}`, { lineGap: 4 })
+            // estimate pages for binary files if needed
+            currentPage += Math.ceil(data.length / bytesPerPage)
           } else {
             let data = await fsPromises.readFile(filePath, "utf8")
+
+            doc.addPage()
+
             data = data.replace(/Ð/g, "\n")
             data = data.replace(/\r\n/g, "\n")
             data = data.replace(/\r/g, "\n")
             data = data.replace(/uþs/g, "")
 
-            doc.addPage()
             doc
               .font("Courier")
               .fontSize(10)
@@ -400,14 +420,25 @@ async function main(
               if (text !== "\n") doc.text(text, { continued: true })
               else doc.text(text)
             }
-          }
-        }
 
-        if (onePdfPerFile) {
-          doc?.end()
+            // estimate pages
+            currentPage += Math.ceil(data.split("\n").length / linesPerPage)
+          }
+
+          // If file is in root or directory, save its path and page number
+          if (directory === tempDir || path.dirname(fileName) !== ".") {
+            filePaths.set(fileName, currentPage)
+          }
+
+          if (onePdfPerFile) {
+            doc?.end()
+          }
         }
       } else if (stat.isDirectory()) {
         await appendFilesToPdf(filePath, removeComments)
+
+        // After processing a directory, save its name and page number
+        filePaths.set(path.relative(tempDir, filePath), currentPage)
       }
     }
   }

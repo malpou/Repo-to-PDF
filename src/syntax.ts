@@ -3,7 +3,7 @@ import { decode } from "html-entities"
 /**
  * @param {string} htmlCode
  */
-export function htmlToJson(
+export default function htmlToJson(
   htmlCode: string
 ): { text: string; color?: string }[] {
   /**
