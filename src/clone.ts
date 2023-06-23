@@ -8,6 +8,7 @@ import PDFDocument from "pdfkit"
 import { default as hljs } from "highlight.js"
 import { isBinaryFileSync } from "isbinaryfile"
 import strip from "strip-comments"
+import pdftk from "node-pdftk"
 
 import htmlToJson from "./syntax"
 import addToC from "./addToC"
@@ -153,7 +154,7 @@ async function askForRepoUrl() {
       filter: function (val: string) {
         return val.toLowerCase() === "yes"
       },
-      when(answers: { onePdfPerFile: any, addPageNumbers: any }) {
+      when(answers: { onePdfPerFile: any; addPageNumbers: any }) {
         return !answers.onePdfPerFile && answers.addPageNumbers
       },
     },
@@ -262,16 +263,10 @@ async function main(
       appendFilesToPdf(tempDir, removeComments).then(() => {
         if (!onePdfPerFile) {
           if (doc) {
-            // Add ToC
-            if (addTableOfContents) {
-              doc.switchToPage(0) // switch to the first page
-              addToC(doc, filePaths)
-            }
-
             //Global Edits to All Pages (Header/Footer, etc)
+            doc.switchToPage(0) // switch to the first page
             let pages = doc.bufferedPageRange() // we get the page range again after adding ToC
             for (let i = 0; i < pages.count; i++) {
-              // start loop from 1, as we've already added ToC to the first page
               doc.switchToPage(i)
 
               // Add page numbers
@@ -287,8 +282,31 @@ async function main(
                 doc.page.margins.bottom = oldBottomMargin
               }
             }
-            doc?.end()
+            
+            // Add ToC to the start of the PDF
+            if (addTableOfContents) {
+              const tempDoc = new PDFDocument({
+                bufferPages: true,
+                autoFirstPage: false,
+              });
+              addToC(tempDoc, filePaths)
+              // Add the content to the temp doc
+              doc!.end()
+              tempDoc.end()
+              const tempDocBuf: Buffer = tempDoc.read() as any;
+              const docBuf: Buffer = doc.read() as any;
+              // Create combined buffer of the two PDFs
+              pdftk.input([tempDocBuf, docBuf]).output().then((combinedBuffer: Buffer) => {
+                console.log(combinedBuffer);
+                fs.writeFileSync(outputFileName + ".full.pdf", combinedBuffer)
+              });
+              // Write the combined buffer to the output file
+            }
+            else {
+              doc.end()
+            }
           }
+
         }
 
         spinner.succeed(
